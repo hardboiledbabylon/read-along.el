@@ -90,7 +90,8 @@
 ;;    different strings after a valid interrupt is issued to the
 ;;    child process, so an error can incorrectly be triggered.
 ;; Oct 1, 2020
-;;    Add read-along-force-reset.
+;;    Add read-along-force-reset.  This helps fix an issue where
+;;    M-x is called while a read-along is in progress.
 ;; Version: 0.0.18 (portable)
 ;; Package-Requires: ((emacs "24.4"))
 ;; Keywords: multimedia
@@ -199,7 +200,7 @@ Search forward until end of buffer or LIMIT."
 (defun dfh--nuke-newlines (str)
   (replace-regexp-in-string "[\n\r]" " " str))
 
-;; END
+;; EXTERNAL CODE END
 
 ;; user-facing variables
 
