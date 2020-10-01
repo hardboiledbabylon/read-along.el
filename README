@@ -1,0 +1,223 @@
+This package provides an interface that sends a stream of visible buffer
+text to a TTS program while highlighting the buffer text that is
+currently being verbalized.
+
+Doing other things in the buffer and/or moving around while it is
+running is not encouraged. The general idea is that, while it is
+running, it has full control of the display and cursor position. And it
+doesn't really make sense for it to be any other way.
+
+==CUSTOMIZABLE VARIABLES==
+
+The variable `read-along-max' specifies the max number of characters
+that will be sent to the TTS.
+
+The variable `read-along-engine' is a PLIST that specifies the program
+to call to perform the verbalization and the arguments to pass to it.
+The program must accept the text to be spoken on STDIN. The value for
+`cmd' is a string specifying the command to run. The values for `args'
+are a list of strings containing the arguments to be passed to `cmd'.
+The value for `kill' is a string containing the additional command that
+might need to be run when halting TTS output. For TTS programs such as
+say or espeak, this is usually unneeded. The value for `kill-str' is the
+string that the system returns on a successful termination of the TTS
+program by the function `read-along-stop'. This can vary from system to
+system. The default string is "interrupt", which is applicable on
+GNU/Linux systems. Any value not specified will be treated as null. At
+minimum, the `cmd' value must be specified.
+
+For example:
+
+(setq read-along-engine '(cmd "espeak-ng" args ("-s" "330") nil)))
+
+calls 'espeak-ng` with the arguments `-s 330' and allows it to be
+terminated solely by a signal to the child process.
+
+The variable `read-along-char-skips' is a string of characters that are
+considered punctuation. This variable is appended to the default
+punctuation defined in `read-along.el'. Skipped punctuation will not be
+highlighted during the verbalization process. Such characters also mark
+the points at which it is permissible to break a span of text into
+sub-strings.
+
+The variable `read-along-string-skips' specifies a list of strings that
+will be skipped. They are treated like punctuation specified by
+`read-along-char-skips'.
+
+After calling either `read-along-char-skips' or
+`read-along-string-skips' be sure to call the function
+`read-along-update-variables'.
+
+The variable `read-along-nobreak' specifies a regexp. The matched area
+will be excluded as a break point when a span is generated. On occasions
+where the length of the match is equal to or exceeds `read-along-max',
+problems could arise.
+
+The variable `read-along-nobreak-exclude' specifies a list of strings
+that will be compared to each match created by `read-along-nobreak'. If
+both are equal, the match will not be excluded as a break point. Often,
+this should be identical to `read-along-skip-strings'.
+
+The variable `read-along-apply-transforms' specifies a list of list
+pairs, each containing a regexp and a replacement string. The
+replacement string can contain regexp-related items as well, such as for
+group match replacement. They can be used for removing text the user
+does not want to be verbalized or for altering how a match is
+verbalized.
+
+In the following example:
+
+(setq read-along-apply-transforms `(("-" " ")
+                               (,(regexp-quote "&amp;") " and ")
+                               ( "<i>\\|<\\i>" "")
+                            ;; ( "<i>\\|<\\i>" " ")
+                               ))
+
+hyphens are removed, as they can sometimes cause the TTS engine to
+change the pitch of conjoined words. The string `&amp;' will be
+pronounced as `and'. Spaces on either side are important here, otherwise
+the replacement text would be concatenated with the text immediately
+before and after, depending on if the buffer text immediately before or
+after the match has any blank space or not. Note that since `;' is a
+breakpoint character this would be the last verbalized item in such a
+span. To avoid this, `&amp;' could be specified by `read-along-nobreak',
+which would protect it from becoming a breakpoint.
+
+Also, as illustrated by the two methods of replacing HTML `i' tags
+above, care should be taken where in some instances replacing something
+such as an HTML tag with a blank space can introduce a pause or gap in
+the verbalization that might not represent the text accurately. For
+example: `She was aboard, not <i>on</i>board' would be verbalized in the
+first instance as: `She was aboard, not on board' whereas using the
+second instead would produce: `She was aboard, not onboard'.
+
+Transformations specified by `read-along-apply-transforms' are applied
+in the order they occur.
+
+Transformations specified by `read-along-apply-transforms' are applied
+to an area of text where breakpoints have already been located, so it
+has no affect in this regard.
+
+Any newlines or carriage returns will be removed from the output string
+before the transformations specified by `read-along-apply-transforms'
+are applied.
+
+If `read-along-apply-transforms' is nil, no transformations are applied.
+
+Any text match in the verbalized area will be highlighted, regardless of
+whether or not it is verbalized or how it is verbalized after the
+application of the transformations specified by
+`read-along-apply-transforms'.
+
+The variable `read-along-downcase' specifies whether output text is
+converted to lowercase before it is sent to the TTS. This can impact how
+some TTS engines determine which capitalized letters are acronyms. This
+process will be performed following `read-along-apply-transforms', if
+`read-along-apply-transforms' is non-nil.
+
+The variable `read-along-ignore-faces' takes a list of FACES. These
+faces will be treated as if they were punctuation specified by
+`read-along-char-skips'. Setting this can in some cases be an
+alternative to `read-along-apply-transforms' if FONTLOCK is active.
+
+The variable `read-along-log-events' enables logging if non-nil. It is
+nil by default. This is mainly for debugging purposes.
+
+The variable `read-along-always-stop-at-end' controls when verbalization
+is halted. If set to a non-nil value, it causes `read-along-stop' to
+allow the span currently being verbalized to complete before halting
+verbalization. If `read-along-always-stop-at-end' is nil, verbalization
+halts immediately. The default value is nil.
+
+The variable `read-along-redisplay-window' specifies whether or not to
+recenter the current line in the window if the text to be verbalized
+extends beyond what is currently visible on the screen. If non-nil and
+the span to be verbalized extends off the screen, the line containing
+the beginning of the span to be verbalized will be re-positioned to the
+top of the display before the verbalization process begins and before
+the span is highlighted. Otherwise the point will be placed at the end
+of the currently verbalized span during the highlighting process and the
+screen will scroll based upon the default or the user's custom
+preferences for such behavior.
+
+The variable `read-along-text-face' specifies the FACE that will be
+applied to the span currently being verbalized. It defaults to inverse
+video.
+
+==FUNCTIONS==
+
+The function `read-along-stop' stops the current verbalization.
+
+The function `read-along-buf' begins verbalizing the buffer from the
+current point to the end of the buffer, highlighting each verbalized
+span as it does so.
+
+The function `read-along-line' verbalizes the current line, starting
+from the beginning, no matter where the cursor was when called.
+
+The function `read-along-to-end-of-line' verbalizes text from point to
+the end of the current line.
+
+The function `read-along-from-beginning-of-line' verbalizes text from
+the beginning of the current line to point.
+
+The function `read-along-paragraph' verbalizes the current paragraph
+from the beginning of the paragraph to its end if point is within a
+valid paragraph.
+
+The function `read-along-this' verbalizes the word at point, if the
+point is at the beginning of, end of, or within a valid string.
+
+The function `read-along-between' takes two arguments, BEG and END,
+which are coordinates within the current buffer, and is designed to be
+called from within LISP programs. It verbalizes the text between BEG and
+END in the current buffer, highlighting each verbalized span as it does
+so.
+
+==BINDINGS==
+
+Default bindings are left to the user. Below are some suggestions.
+
+(global-set-key (kbd "C-c r b") 'read-along-buf)
+(global-set-key (kbd "C-c r l") 'read-along-line)
+(global-set-key (kbd "C-c r t") 'read-along-this)
+(global-set-key (kbd "C-c r s") 'read-along-stop)
+(global-set-key (kbd "C-c r p") 'read-along-paragraph)
+(global-set-key (kbd "C-c r >") 'read-along-to-end-of-line)
+(global-set-key (kbd "C-c r <") 'read-along-from-beginning-of-line)
+
+==NOTES==
+
+When `hl-line-mode' is active, `read-along.el' will temporarily
+deactivate it while verbalizing and then reactivate it upon completion.
+This provides a better visual experience.
+
+Text that has the `invisible' property set to non-nil will not be
+verbalized.
+
+In all cases the cursor will be placed at the end of the current
+verbalized area.
+
+All English-language punctuation except for the hyphen and ASCII
+apostrophe are skipped or interpreted as valid breakpoints, meaning
+punctuation such as the question mark or exclamation point do not impact
+the intonation of the TTS output, so it is as if all statements
+implicitly end with a period.
+
+Since UTF-8 utilizes 0x2019 as both a closing single quote and as an
+apostrophe, so-called "typographic quotation marks", it is
+computationally difficult to determine when such a character is
+operating in what role. This gives the choice of treating it as a
+non-break point, which might interfere with the semantic breakup of the
+verbalized text, or having a break point at every word containing an
+apostrophe. Of the two, the second would likely be the most disruptive.
+This constraint is also present when using ASCII 0x27. The best solution
+might be to use 0x27 as the apostrophe character and 0x2018 and 0x2019
+as opening and closing single quotes in plain text.
+
+When avoiding the verbalization of individual characters, as in the case
+of the hyphen, it is best to use `read-along-apply-transforms'. If they
+were specified by `read-along-char-skips', they would cause
+verbalization to halt and restart just before and just after each
+instance, in a way that would break the flow of naturalized speech and
+create a high degree of choppiness.
