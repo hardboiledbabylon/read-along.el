@@ -90,14 +90,14 @@
 (defun preceding-string (len)
   (if (bobp)
       ""
-    (if ( < (- (point) (point-min)) len)
+    (if (< (point) len)
 	""
       (buffer-substring-no-properties (- (point) len) (point)))))
 
 (defun following-string (len)
   (if (eobp)
       ""
-    (if ( < (- (point-max) (point)) len)
+    (if (< (- (point-max) (point)) len)
 	""
       (buffer-substring-no-properties (point) (+ (point) len) ))))
 
@@ -106,7 +106,7 @@
 (defun following-string-at (pos len)
   (if (eobp)
       ""
-    (if ( < (- (point-max) pos) len)
+    (if (< (- (point-max) pos) len)
 	""
       (buffer-substring-no-properties pos (+ pos len) ))))
 
