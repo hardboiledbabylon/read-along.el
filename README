@@ -221,3 +221,11 @@ were specified by `read-along-char-skips', they would cause
 verbalization to halt and restart just before and just after each
 instance, in a way that would break the flow of naturalized speech and
 create a high degree of choppiness.
+
+==KNOWN BUGS==
+
+If you call M-x while a read-along is in progress, it will hang at the
+end. C-g 3 times will break out of it, but read-along.el will think it
+is both still in the middle of a read and not reading at the same time,
+so it won't be able to restart. In such a case, call
+`read-along-force-reset'.

@@ -89,16 +89,117 @@
 ;;    Add kill-str support.  Different systems return too many
 ;;    different strings after a valid interrupt is issued to the
 ;;    child process, so an error can incorrectly be triggered.
-;; Version: 0.0.17
+;; Oct 1, 2020
+;;    Add read-along-force-reset.
+;; Version: 0.0.18 (portable)
 ;; Package-Requires: ((emacs "24.4"))
 ;; Keywords: multimedia
 
 ;; This file is not part of GNU Emacs.
 
+;;; KNOWN BUGS:
+
+;;  If you call M-x while a read-along is in progress, it will
+;;  hang at the end.  C-g 3 times will break out of it, but
+;;  read-along.el will think it is both still in the middle of a
+;;  read and not reading at the same time, so it won't be able to
+;;  restart.
+
 ;;; Code:
 
-(require 'dfh-str)
-(require 'dfh-faces)
+;; NOTE:
+;; These were pulled from dfh-str.el and dfh-faces.el to make this
+;; more portable as a single file.
+
+(defun dfh--next-face-in (faces start &optional limit invert)
+  "Return the position of the first character with any one
+of the faces in list FACES. If INVERT is non-nil, return the 
+position of the first character with a face not in FACES. 
+Search forward until end of buffer or LIMIT."
+
+  (unless (numberp limit) (setq limit (point-max)))
+
+  (let ((f nil) (r nil) (WHERE start))
+    (while (and (not r) (< WHERE limit))
+      (setq f (get-text-property WHERE 'face))
+      (if invert
+          (when (not (memq f faces))
+            (setq r WHERE))
+        (when (memq f faces)
+          (setq r WHERE)))
+      (setq WHERE (1+ WHERE)))
+    (or r limit)))
+
+(defun dfh--trim-str-l (str)
+  (when str
+    (replace-regexp-in-string "\\`[[:space:]\t\n\r]+" "" str)))
+
+(defun dfh--trim-str-r (str)
+  (when str
+    (replace-regexp-in-string "[[:space:]\t\n\r]+\\'" "" str)))
+
+(defun dfh--trim-str (str)
+  (dfh--trim-str-l (dfh--trim-str-r str)))
+
+(defun dfh--str-collapse-whitespace (str)
+  (replace-regexp-in-string "[[:space:]]+" " " str))
+
+;; replace all matches of RGX in STR with
+;; a string of equal length composed of the
+;; character REP only if the match is not equal
+;; to one of the strings in the list XMPT
+(defun dfh--str-nullify-unless (str rgx rep xmpt)
+  (let ((lenstr (length str))
+	(w 0)
+	(out ""))
+    (if (= 0 lenstr)
+	""
+      (save-match-data
+	(while (string-match rgx str w)
+	  (let* ((mend (match-end 0))
+		 (mbeg (match-beginning 0))
+		 (lm (- mend mbeg))
+                 (ms (match-string-no-properties 0 str)))
+            (if (member ms xmpt)
+                (setq out (concat out (substring str w mend)))
+	      (setq out (concat out (substring str w mbeg)
+                                (make-string lm rep))))
+	    (setq w mend))))
+      (if (string= "" out)
+	  str
+	(let ((lo (length out)))
+	  (if (< lo lenstr)
+	      (setq out (concat out (substring str lo lenstr)))))
+	out))))
+
+(defun dfh--skip-strings-forward (strings end)
+  (let ((ret 0))
+    (if strings
+        (catch 'ret
+          (dolist (mstr strings ret)
+            (let* ((lstr (length mstr)) (fstr (following-string lstr)))
+              (when (string= fstr mstr)
+                (when (<= (+ (point) lstr) end)
+                  (forward-char lstr)
+                  (throw 'ret lstr))))))
+      ret)))
+
+(defun dfh--skip-strings-backward (strings end)
+  (let ((ret 0))
+    (if strings
+        (catch 'ret
+        (dolist (mstr strings ret)
+          (let* ((lstr (length mstr)) (fstr (preceding-string lstr)))
+            (when (string= fstr mstr)
+              (when (>= (- (point) lstr) end)
+                (backward-char lstr)
+                (throw 'ret (* -1 lstr)))))))
+      ret)))
+
+(defun dfh--nuke-newlines (str)
+  (replace-regexp-in-string "[\n\r]" " " str))
+
+;; END
 
 ;; user-facing variables
 
@@ -192,7 +293,7 @@
   (plist-get read-along-engine 'args))
 
 (defun read-along--valid-str-p (str)
-  (> (length (dfh-trim-str str)) 0))
+  (> (length (dfh--trim-str str)) 0))
 
 (defun read-along--overlay-rm()
   (when read-along--c-overlays
@@ -222,7 +323,7 @@
       (dolist (OV read-along--c-overlays nil)
         (overlay-put OV 'face 'read-along-text-face)) )))
 
-(defun read-along--reset()
+(defun read-along--reset ()
   "Reset internal state."
   (setq read-along--c-pr nil)
   (setq read-along--c-buf nil)
@@ -241,6 +342,10 @@
     (setq read-along--need-restore-hl-line nil)
     (hl-line-mode 1))
   (read-along--log "RESET"))
+
+(defun read-along-force-reset  ()
+  (interactive)
+  (read-along--reset))
 
 (defun read-along--string (str)
   "Open an async process, feed its stdin with STR."
@@ -264,7 +369,7 @@
       (process-send-eof read-along--c-pr)) ))
 
 (defun read-along--sentinel (process event)
-  (let* ((EV (dfh-trim-str event))
+  (let* ((EV (dfh--trim-str event))
          (KS (plist-get read-along-engine 'kill-str)))
 
     (unless KS (setq KS "interrupt"))
@@ -404,7 +509,7 @@ Returns a cons cells or nil if nothing can be excised."
       (setq raw-str (buffer-substring-no-properties beg end))
 
        (when read-along-nobreak
-	(setq raw-str (dfh-str-nullify-unless
+	(setq raw-str (dfh--str-nullify-unless
                        raw-str read-along-nobreak
                        ?e
                        read-along-nobreak-exclude)))
@@ -415,12 +520,12 @@ Returns a cons cells or nil if nothing can be excised."
 	      (replace-regexp-in-string
 	       "[[:space:]\r\n]+[^[:space:]]+\\'" "" raw-str)))
 
-      (setq raw-str (dfh-trim-str-r raw-str))
+      (setq raw-str (dfh--trim-str-r raw-str))
 
       (if (> (length raw-str) 0)
 	  (let ((chunks (split-string raw-str read-along--tail-splits t)))
             (if chunks
-		(let* ((chunk (dfh-trim-str-r (car chunks)))
+		(let* ((chunk (dfh--trim-str-r (car chunks)))
                        (lchunk (length chunk))
                        (pbeg beg)
                        (pend (+ pbeg lchunk)))
@@ -443,7 +548,7 @@ Returns a cons cells or nil if nothing can be excised."
       (setq tmp-str (replace-regexp-in-string
 		     (car pair) (cadr pair) tmp-str t)))
 
-    (setq tmp-str (dfh-trim-str tmp-str))
+    (setq tmp-str (dfh--trim-str tmp-str))
     
     (if (= (length tmp-str) 0)
 	nil
@@ -451,19 +556,19 @@ Returns a cons cells or nil if nothing can be excised."
 
 (defun read-along--skip-forward (chars strings end)
   (while (or (> (skip-chars-forward chars end) 0) 
-             (> (skip-strings-forward strings end) 0))))
+             (> (dfh--skip-strings-forward strings end) 0))))
 
 (defun read-along--skip-backward (chars strings end)
   (while (or (< (skip-chars-backward chars end) 0)
-             (< (skip-strings-backward strings end) 0))))
+             (< (dfh--skip-strings-backward strings end) 0))))
 
 (defun read-along--pretty-spaces (str)
   "Remove single newlines, collapse consecutive space 
 characters to one, and remove leading / trailing spaces
 from STR. If the length of the resultant string is 0, 
 return nil."
-  (let ((ostr (dfh-trim-str
-             (dfh-str-collapse-whitespace str))))
+  (let ((ostr (dfh--trim-str
+             (dfh--str-collapse-whitespace str))))
     (if (> (length ostr) 0)
         ostr
       nil)))
@@ -503,10 +608,10 @@ string if `read-along-downcase' is non-nil."
                              visible-start 'invisible nil max))
 
           (when read-along-ignore-faces
-            (setq visible-start (next-face-in
+            (setq visible-start (dfh--next-face-in
                                  read-along-ignore-faces
                                  visible-start visible-end t))
-            (setq visible-end (next-face-in
+            (setq visible-end (dfh--next-face-in
                                read-along-ignore-faces
                                visible-start visible-end nil)))
 
@@ -539,7 +644,7 @@ string if `read-along-downcase' is non-nil."
 
               ;; clear newlines so regexes in transforms
               ;; don't have to worry about them.
-              (setq ostr (nuke-newlines
+              (setq ostr (dfh--nuke-newlines
                           (buffer-substring-no-properties zbeg zend)))
               
               (when (and ostr read-along-transforms)
